@@ -258,28 +258,104 @@ def fit_model(name, model, train_ds, val_ds, test_ds, weights_dict):
 
     model.save(f"./results/models/{name}-final-model.keras")
 
+    # Evaluate test set first to include in plots
+    test_loss, test_accuracy = model.evaluate(test_ds)
+    result_str = 'Test loss: {} accuracy: {}\n'.format(test_loss, test_accuracy)
+    print(result_str)
+
     # visualise accuracy
     train_acc = history.history['accuracy']
     val_acc = history.history['val_accuracy']
 
-    plt.figure(figsize=(8, 8))
+    # Get final training and validation accuracy
+    final_train_acc = train_acc[-1]
+    final_val_acc = val_acc[-1]
+
+    # Create figure with 3 subplots
+    plt.figure(figsize=(12, 10))
+
+    # Subplot 1: Training history over epochs
+    plt.subplot(2, 2, 1)
     plt.grid(True, axis="y")
-    plt.subplot(2, 1, 1)
-    plt.plot(train_acc, label='Training Accuracy')
-    plt.plot(val_acc, label='Validation Accuracy')
+    plt.plot(train_acc, label='Training Accuracy', linewidth=2)
+    plt.plot(val_acc, label='Validation Accuracy', linewidth=2)
+    # Add horizontal line for test accuracy
+    plt.axhline(y=test_accuracy, color='r', linestyle='--', linewidth=2, label=f'Test Accuracy ({test_accuracy:.3f})')
     plt.legend(loc='lower right')
+    plt.xlabel('Epoch')
     plt.ylabel('Accuracy')
     plt.ylim([min(plt.ylim()),1])
-    plt.title('Training and Validation Accuracy')
+    plt.title('Training, Validation and Test Accuracy')
+
+    # Subplot 2: Final accuracy comparison bar chart
+    plt.subplot(2, 2, 2)
+    datasets = ['Training', 'Validation', 'Test']
+    accuracies = [final_train_acc, final_val_acc, test_accuracy]
+    colors = ['#1f77b4', '#ff7f0e', '#d62728']
+    bars = plt.bar(datasets, accuracies, color=colors, alpha=0.7, edgecolor='black')
+
+    # Add value labels on bars
+    for bar, acc in zip(bars, accuracies):
+        height = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width()/2., height,
+                f'{acc:.3f}',
+                ha='center', va='bottom', fontweight='bold')
+
+    plt.ylabel('Accuracy')
+    plt.ylim([0, 1.1])
+    plt.title('Final Accuracy Comparison')
+    plt.grid(True, axis="y", alpha=0.3)
+
+    # Subplot 3: Loss curves
+    if 'loss' in history.history and 'val_loss' in history.history:
+        plt.subplot(2, 2, 3)
+        plt.grid(True, axis="y")
+        train_loss = history.history['loss']
+        val_loss = history.history['val_loss']
+        plt.plot(train_loss, label='Training Loss', linewidth=2)
+        plt.plot(val_loss, label='Validation Loss', linewidth=2)
+        plt.axhline(y=test_loss, color='r', linestyle='--', linewidth=2, label=f'Test Loss ({test_loss:.3f})')
+        plt.legend(loc='upper right')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title('Training, Validation and Test Loss')
+
+    # Subplot 4: Summary text
+    plt.subplot(2, 2, 4)
+    plt.axis('off')
+    summary_text = f"""
+    Training Summary
+    ═══════════════════════════
+
+    Model: {name}
+    Epochs: {len(train_acc)}
+
+    Final Results:
+    ───────────────────────────
+    Training Accuracy:   {final_train_acc:.4f}
+    Validation Accuracy: {final_val_acc:.4f}
+    Test Accuracy:       {test_accuracy:.4f}
+
+    Training Loss:       {train_loss[-1] if 'loss' in history.history else 'N/A':.4f if 'loss' in history.history else ''}
+    Validation Loss:     {val_loss[-1] if 'val_loss' in history.history else 'N/A':.4f if 'val_loss' in history.history else ''}
+    Test Loss:           {test_loss:.4f}
+
+    Generalization Gap:
+    ───────────────────────────
+    Train-Val:  {abs(final_train_acc - final_val_acc):.4f}
+    Train-Test: {abs(final_train_acc - test_accuracy):.4f}
+    Val-Test:   {abs(final_val_acc - test_accuracy):.4f}
+    """
+    plt.text(0.1, 0.5, summary_text, fontsize=10, family='monospace',
+             verticalalignment='center')
+
+    plt.tight_layout()
     os.makedirs("./results/plots", exist_ok=True)
     plt.savefig("./results/plots/accuracy-{}.pdf".format(name), format="pdf")
+    plt.close()
 
     measure_performance("validation", name, model, val_ds)
     del val_ds
-
-    test_loss, test_accuracy = model.evaluate(test_ds)
-    result_str = 'Test loss: {} accuracy: {}\n'.format(test_loss, test_accuracy)
-    print(result_str)
 
     os.makedirs("./results/scores", exist_ok=True)
     with open("./results/scores/results-{}.txt".format(name), "a+") as f:

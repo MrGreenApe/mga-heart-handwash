@@ -22,7 +22,8 @@ train_ds = timedistributed_dataset_from_directory(
     image_size=IMG_SIZE,
     shuffle=True,
     label_mode='categorical',
-    batch_size=batch_size)
+    batch_size=batch_size,
+    crop_to_aspect_ratio=True)  # Preserve aspect ratio during resize
 
 val_ds = timedistributed_dataset_from_directory(
     data_dir,
@@ -34,7 +35,8 @@ val_ds = timedistributed_dataset_from_directory(
     image_size=IMG_SIZE,
     shuffle=True,
     label_mode='categorical',
-    batch_size=batch_size)
+    batch_size=batch_size,
+    crop_to_aspect_ratio=True)  # Preserve aspect ratio during resize
 
 test_ds = timedistributed_dataset_from_directory(
     test_data_dir,
@@ -44,7 +46,8 @@ test_ds = timedistributed_dataset_from_directory(
     image_size=IMG_SIZE,
     shuffle=False,
     label_mode='categorical',
-    batch_size=batch_size)
+    batch_size=batch_size,
+    crop_to_aspect_ratio=True)  # Preserve aspect ratio during resize
 
 weights_dict = get_weights_dict(data_dir, CLASS_NAMES)
 

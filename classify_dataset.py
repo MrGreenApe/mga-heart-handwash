@@ -323,6 +323,18 @@ def fit_model(name, model, train_ds, val_ds, test_ds, weights_dict):
     # Subplot 4: Summary text
     plt.subplot(2, 2, 4)
     plt.axis('off')
+
+    # Prepare loss display strings
+    if 'loss' in history.history:
+        final_train_loss = f"{history.history['loss'][-1]:.4f}"
+    else:
+        final_train_loss = "N/A"
+
+    if 'val_loss' in history.history:
+        final_val_loss = f"{history.history['val_loss'][-1]:.4f}"
+    else:
+        final_val_loss = "N/A"
+
     summary_text = f"""
     Training Summary
     ═══════════════════════════
@@ -336,8 +348,8 @@ def fit_model(name, model, train_ds, val_ds, test_ds, weights_dict):
     Validation Accuracy: {final_val_acc:.4f}
     Test Accuracy:       {test_accuracy:.4f}
 
-    Training Loss:       {train_loss[-1]:.4f if 'loss' in history.history else 'N/A'}
-    Validation Loss:     {val_loss[-1]:.4f if 'val_loss' in history.history else 'N/A'}
+    Training Loss:       {final_train_loss}
+    Validation Loss:     {final_val_loss}
     Test Loss:           {test_loss:.4f}
 
     Generalization Gap:

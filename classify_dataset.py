@@ -336,8 +336,8 @@ def fit_model(name, model, train_ds, val_ds, test_ds, weights_dict):
     Validation Accuracy: {final_val_acc:.4f}
     Test Accuracy:       {test_accuracy:.4f}
 
-    Training Loss:       {train_loss[-1] if 'loss' in history.history else 'N/A':.4f if 'loss' in history.history else ''}
-    Validation Loss:     {val_loss[-1] if 'val_loss' in history.history else 'N/A':.4f if 'val_loss' in history.history else ''}
+    Training Loss:       {train_loss[-1]:.4f if 'loss' in history.history else 'N/A'}
+    Validation Loss:     {val_loss[-1]:.4f if 'val_loss' in history.history else 'N/A'}
     Test Loss:           {test_loss:.4f}
 
     Generalization Gap:

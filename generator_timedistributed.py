@@ -7,12 +7,117 @@ import os
 import numpy as np
 
 import tensorflow as tf
-from tensorflow.python.data.ops import dataset_ops
-from tensorflow.python.keras.layers.preprocessing import image_preprocessing
-from tensorflow.python.keras.preprocessing import dataset_utils
-from tensorflow.python.keras.preprocessing import image as keras_image_ops
-from tensorflow.python.ops import image_ops
-from tensorflow.python.ops import io_ops
+from tensorflow.keras.preprocessing import image as keras_image_ops
+
+_INTERPOLATION_MAP = {
+    'bilinear': tf.image.ResizeMethod.BILINEAR,
+    'nearest': tf.image.ResizeMethod.NEAREST_NEIGHBOR,
+    'nearest_neighbor': tf.image.ResizeMethod.NEAREST_NEIGHBOR,
+    'bicubic': tf.image.ResizeMethod.BICUBIC,
+    'area': tf.image.ResizeMethod.AREA,
+    'lanczos3': tf.image.ResizeMethod.LANCZOS3,
+    'lanczos5': tf.image.ResizeMethod.LANCZOS5,
+    'gaussian': tf.image.ResizeMethod.GAUSSIAN,
+    'mitchellcubic': tf.image.ResizeMethod.MITCHELLCUBIC,
+}
+
+
+def _get_interpolation(name):
+  key = name.lower()
+  if key not in _INTERPOLATION_MAP:
+    raise ValueError(f'Unsupported interpolation mode: {name}')
+  return _INTERPOLATION_MAP[key]
+
+
+def _check_validation_split(validation_split, subset, shuffle, seed):
+  if validation_split is None:
+    return
+  if not 0 < validation_split < 1:
+    raise ValueError('`validation_split` must be strictly between 0 and 1.')
+  if subset not in {'training', 'validation'}:
+    raise ValueError('`subset` must be "training" or "validation" when using `validation_split`.')
+  if seed is None:
+    raise ValueError('`seed` must be set when `validation_split` is used.')
+  if not shuffle:
+    raise ValueError('`shuffle` must be True when `validation_split` is set.')
+
+
+def _index_directory(directory,
+                     labels,
+                     formats,
+                     class_names,
+                     shuffle,
+                     seed,
+                     follow_links):
+  directory = os.path.abspath(directory)
+  if labels == 'inferred':
+    if class_names is None:
+      class_names = [entry.name for entry in os.scandir(directory) if entry.is_dir()]
+      class_names.sort()
+    else:
+      class_names = list(class_names)
+    file_paths = []
+    label_list = []
+    for index, class_name in enumerate(class_names):
+      class_dir = os.path.join(directory, class_name)
+      if not os.path.isdir(class_dir):
+        raise ValueError(f'Subdirectory "{class_name}" does not exist in {directory}.')
+      for root, _, files in os.walk(class_dir, followlinks=follow_links):
+        for fname in sorted(files):
+          if formats and not fname.lower().endswith(formats):
+            continue
+          file_paths.append(os.path.join(root, fname))
+          label_list.append(index)
+  else:
+    file_paths = []
+    for root, _, files in os.walk(directory, followlinks=follow_links):
+      for fname in sorted(files):
+        if formats and not fname.lower().endswith(formats):
+          continue
+        file_paths.append(os.path.join(root, fname))
+    label_list = None
+    if labels is not None:
+      label_list = list(labels)
+      if len(label_list) != len(file_paths):
+        raise ValueError('`labels` must have the same length as the number of files found.')
+    if class_names is None and label_list is not None:
+      class_names = sorted(set(label_list))
+
+  if shuffle and file_paths:
+    rng = np.random.default_rng(seed)
+    indices = np.arange(len(file_paths))
+    rng.shuffle(indices)
+    file_paths = [file_paths[i] for i in indices]
+    if label_list is not None:
+      label_list = [label_list[i] for i in indices]
+
+  return file_paths, label_list, class_names
+
+
+def _split_training_validation(image_paths, labels, validation_split, subset):
+  if validation_split is None:
+    return image_paths, labels
+  split_index = int(len(image_paths) * validation_split)
+  if subset == 'validation':
+    new_paths = image_paths[:split_index]
+    new_labels = labels[:split_index] if labels is not None else None
+  else:
+    new_paths = image_paths[split_index:]
+    new_labels = labels[split_index:] if labels is not None else None
+  return new_paths, new_labels
+
+
+def _labels_to_dataset(labels, label_mode, num_classes):
+  labels_array = np.array(labels)
+  if label_mode == 'int':
+    data = labels_array.astype('int32')
+  elif label_mode == 'binary':
+    data = labels_array.astype('float32')
+  elif label_mode == 'categorical':
+    data = tf.one_hot(labels_array.astype('int32'), num_classes)
+  else:
+    raise ValueError(f'Unsupported `label_mode`: {label_mode}')
+  return tf.data.Dataset.from_tensor_slices(data)
 
 ALLOWLIST_FORMATS = ('.bmp', '.gif', '.jpeg', '.jpg', '.png')
 
@@ -169,13 +274,13 @@ def timedistributed_dataset_from_directory(image_directory,
     raise ValueError(
         '`color_mode` must be one of {"rbg", "rgba", "grayscale"}. '
         'Received: %s' % (color_mode,))
-  interpolation = image_preprocessing.get_interpolation(interpolation)
-  dataset_utils.check_validation_split_arg(
-      validation_split, subset, shuffle, seed)
+  interpolation = interpolation.lower()
+  resize_method = _get_interpolation(interpolation)
+  _check_validation_split(validation_split, subset, shuffle, seed)
 
   if seed is None:
     seed = np.random.randint(1e6)
-  image_paths, labels, class_names = dataset_utils.index_directory(
+  image_paths, labels, class_names = _index_directory(
       image_directory,
       labels,
       formats=ALLOWLIST_FORMATS,
@@ -190,9 +295,10 @@ def timedistributed_dataset_from_directory(image_directory,
         'Found the following classes: %s' % (class_names,))
 
   filtered_image_paths = []
-  filtered_labels = []
+  filtered_labels = [] if labels is not None else None
   image_path_set = set(image_paths)
-  for path, label in zip(image_paths, labels):
+  for index, path in enumerate(image_paths):
+    label = labels[index] if labels is not None else None
     dirname = os.path.dirname(path)
     filename = os.path.basename(path)
     fields = filename.split("_")
@@ -213,18 +319,20 @@ def timedistributed_dataset_from_directory(image_directory,
           break
       if all_ok:
         filtered_image_paths.append(path)
-        filtered_labels.append(label)
+        if filtered_labels is not None:
+          filtered_labels.append(label)
       #print(path, label)
   image_paths = filtered_image_paths
   labels = filtered_labels
 
-  image_paths, labels = dataset_utils.get_training_or_validation_split(
+  image_paths, labels = _split_training_validation(
       image_paths, labels, validation_split, subset)
 
   if not image_paths:
     raise ValueError('No images found.')
 
-  num_classes=len(class_names)
+  class_names = list(class_names) if class_names is not None else []
+  num_classes = len(class_names)
 
   img_dataset = paths_and_labels_to_dataset(
       image_paths,
@@ -233,12 +341,13 @@ def timedistributed_dataset_from_directory(image_directory,
       frame_step,
       num_channels,
       num_classes,
-      interpolation,
+    interpolation,
+    resize_method,
       crop_to_aspect_ratio)
 
   if label_mode:
-    label_dataset = dataset_utils.labels_to_dataset(labels, label_mode, num_classes)
-    dataset = dataset_ops.Dataset.zip((img_dataset, label_dataset))
+    label_dataset = _labels_to_dataset(labels, label_mode, num_classes)
+    dataset = tf.data.Dataset.zip((img_dataset, label_dataset))
   else:
     dataset = img_dataset
 
@@ -260,6 +369,7 @@ def paths_and_labels_to_dataset(image_paths,
                                 num_channels,
                                 num_classes,
                                 interpolation,
+                                resize_method,
                                 crop_to_aspect_ratio=False):
   """Constructs a dataset of images and labels."""
   image_paths_multi = []
@@ -277,29 +387,29 @@ def paths_and_labels_to_dataset(image_paths,
       frame_num += frame_step
     image_paths_multi.append(paths)
 
-  path_ds = dataset_ops.Dataset.from_tensor_slices(image_paths_multi)
-  args = (image_size, num_channels, interpolation, crop_to_aspect_ratio)
+  path_ds = tf.data.Dataset.from_tensor_slices(image_paths_multi)
+  args = (image_size, num_channels, interpolation, resize_method, crop_to_aspect_ratio)
   img_ds = path_ds.map(
       lambda x: load_image(x, *args))
   return img_ds
 
 
 def load_image(path, image_size,
-               num_channels, interpolation,
+               num_channels, interpolation, resize_method,
                crop_to_aspect_ratio=False):
   """Load an image from a path and resize it."""
   imgs = []
   num_frames = len(path)
   for i in range(num_frames):
-    img = io_ops.read_file(path[i])
-    img = image_ops.decode_image(
+    img = tf.io.read_file(path[i])
+    img = tf.image.decode_image(
       img, channels=num_channels, expand_animations=False)
 
     if crop_to_aspect_ratio:
       img = keras_image_ops.smart_resize(img, image_size,
                                          interpolation=interpolation)
     else:
-      img = image_ops.resize_images_v2(img, image_size, method=interpolation)
+      img = tf.image.resize(img, image_size, method=resize_method)
 
     img.set_shape((image_size[0], image_size[1], num_channels))
     imgs.append(img)

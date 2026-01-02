@@ -370,6 +370,7 @@ def evaluate(name, train_ds, val_ds, test_ds, weights_dict={}, model=None):
         name += "-extralayers" + str(num_extra_layers)
 
     # clear the results file
+    os.makedirs("./results/scores", exist_ok=True)
     with open("./results/scores/results-{}.txt".format(name), "a+") as f:
         pass
 

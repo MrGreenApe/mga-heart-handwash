@@ -42,10 +42,14 @@ suffix = os.getenv("HANDWASH_SUFFIX", "")
 pretrained_model_path = os.getenv("HANDWASH_PRETRAINED_MODEL", "")
 num_extra_layers = int(os.getenv("HANDWASH_EXTRA_LAYERS", 0))
 
-# data augmentation
+# Enhanced data augmentation for better real-world generalization
 data_augmentation = tf.keras.Sequential([
     tf.keras.layers.RandomFlip('horizontal'),
-    tf.keras.layers.RandomRotation(0.2),
+    tf.keras.layers.RandomRotation(0.15),  # ±15% (±54 degrees) - less aggressive rotation
+    tf.keras.layers.RandomZoom(0.2),  # ±20% zoom to simulate different camera distances
+    tf.keras.layers.RandomTranslation(0.1, 0.1),  # ±10% translation for hand position variations
+    tf.keras.layers.RandomBrightness(0.2),  # ±20% brightness for lighting variations
+    tf.keras.layers.RandomContrast(0.2),  # ±20% contrast for different cameras/lighting
 ])
 
 def freeze_model(model):
@@ -166,10 +170,10 @@ def get_time_distributed_model():
     inputs = tf.keras.Input(shape=INPUT_SHAPE)
     x = inputs
     x = tf.keras.layers.TimeDistributed(single_frame_model)(x)
-    x = tf.keras.layers.GRU(256)(x)
+    x = tf.keras.layers.GRU(256, dropout=0.3, recurrent_dropout=0.2)(x)  # Add dropout to GRU
     for i in range(num_extra_layers):
-        x = tf.keras.layers.Dense(128, activation='relu')(x)
-        x = tf.keras.layers.Dropout(0.2)(x)
+        x = tf.keras.layers.Dense(128, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.01))(x)
+        x = tf.keras.layers.Dropout(0.4)(x)  # Increased dropout from 0.2 to 0.4
     outputs = tf.keras.layers.Dense(N_CLASSES, activation='softmax')(x)
     model = tf.keras.Model(inputs, outputs)
     print(model.summary())
@@ -451,7 +455,7 @@ def evaluate(name, train_ds, val_ds, test_ds, weights_dict={}, model=None):
             model = get_default_model()
 
     model.compile(optimizer='Adam',
-                  loss=tf.keras.losses.CategoricalCrossentropy(),
+                  loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.1),  # Add label smoothing
                   metrics=['accuracy'])
 
     if num_extra_layers:
